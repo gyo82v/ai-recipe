@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { InferenceClient } from "@huggingface/inference"
 
-const client = new InferenceClient(process.env.HUGGINGFACE_API_KEY)
+const client = new InferenceClient(process.env.HUGGINGFACE_API_KEY!)
 
 const SYSTEM_PROMPT = `
 You are a professional culinary assistant.
@@ -34,38 +34,50 @@ One helpful optional tip or variation.
 
 export async function POST(req: Request) {
   try {
-    const { ingredients } = await req.json()
+    const body: unknown = await req.json()
 
-    if (!Array.isArray(ingredients) || ingredients.length < 5) {
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !("ingredients" in body) ||
+      !Array.isArray((body).ingredients)
+    ) {
+      return NextResponse.json(
+        { error: "Invalid ingredients payload." },
+        { status: 400 }
+      )
+    }
+
+    const ingredients = (body as { ingredients: string[] }).ingredients
+
+    if (ingredients.length < 5) {
       return NextResponse.json(
         { error: "At least 5 ingredients are required." },
         { status: 400 }
       )
     }
 
-    const ingredientsString = ingredients.join(", ")
-
     const response = await client.chatCompletion({
-      model: "mistralai/Mistral-7B-Instruct-v0.3",
+      model: "Qwen/Qwen2.5-Coder-7B-Instruct",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
-          content: `I have the following ingredients: ${ingredientsString}. Please suggest a recipe.`,
+          content: `I have the following ingredients: ${ingredients.join(
+            ", "
+          )}. Please suggest a recipe.`,
         },
       ],
       max_tokens: 1024,
     })
 
-    const recipe = response.choices[0].message.content
-    console.log("API key:", process.env.HUGGINGFACE_API_KEY ? "Present" : "Missing")
+    const recipe = response.choices[0]?.message?.content
 
     return NextResponse.json({ recipe })
-  } catch (error) {
-    console.error("AI error:", error)
-    return NextResponse.json(
-      { error: "Failed to generate recipe." },
-      { status: 500 }
-    )
+  } catch (error: unknown) {
+    console.error("AI route error:", error)
+    const message = error instanceof Error ? error.message : "Unknown error"
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
+
